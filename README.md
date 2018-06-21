@@ -2,6 +2,8 @@
 
 This is a port of TodoMVC app with an Elm frontend with Elixir/Absinthe/GraphQL backend.
 
+Original Elm frontend code by Evan Czaplicki at https://github.com/evancz/elm-todomvc
+
 
 ## Elm Installation Notes
 
@@ -35,25 +37,23 @@ and install the package with elm-github-install.
 
 ## Sending GraphQL Documents on Websockets
 
-```
-def handle_in("doc", payload, socket) do
-    config = socket.assigns[:absinthe]
 
-    opts =
-      config.opts
-      |> Keyword.put(:variables, Map.get(payload, "variables", %{}))
+Cobbled together a Phoenix channel handler based on Absinthe.Phoenix.Channel.
 
-    query = Map.get(payload, "query", "")
+We send a "doc" event to the channel to make an Absinthe query or mutation.
 
-    Absinthe.Logger.log_run(:debug, {
-      query,
-      config.schema,
-      [],
-      opts,
-    })
+Also the channel has pubsub setup, so that it can be connected to by GraphiQL.
 
-    ... send reply
-```
+
+## Bugs / TODO
+
+The original Elm TodoMVC persisted updates in browser local storage, which is
+nice for persistence between browser sessions.  What is the best strategy for
+an offline app that can go back online?  First, load from local storage, then
+query the backend for more recent changes, and finally keep things in sync
+by using Absinthe subscriptions if the backend store is modified by other users.
+
+Hoping to find a clean implementation of this kind of syncing somewhere.
 
 
 ## Phoenix/Absinthe Info
