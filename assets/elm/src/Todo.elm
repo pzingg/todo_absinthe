@@ -34,9 +34,8 @@ import Uuid exposing (Uuid)
 import Random.Pcg exposing (Seed, initialSeed, step)
 
 
--- 1.: In your elm code, store the seed and update it every time you create a new Uuid
-
-
+{-| State is passed in from JavaScript local storage if found at startup. See js/app.js.
+-}
 main : Program (Maybe State) Model Msg
 main =
     Html.programWithFlags
@@ -47,6 +46,8 @@ main =
         }
 
 
+{-| Implemntation in js/app.js.
+-}
 port setStorage : State -> Cmd msg
 
 
@@ -93,6 +94,8 @@ type alias Presence =
     Dict String (List Json.Value)
 
 
+{-| UI state.
+-}
 type alias State =
     { entries : List Entry
     , field : String
@@ -110,6 +113,8 @@ type alias Model =
     }
 
 
+{-| Frontend version of a todo item.
+-}
 type alias Entry =
     { description : String
     , completed : Bool
@@ -118,6 +123,8 @@ type alias Entry =
     }
 
 
+{-| Backend version of a todo item.
+-}
 type alias BackendEntry =
     { id : String
     , title : String
@@ -403,7 +410,7 @@ socketAddress =
     "ws://localhost:4000/socket/websocket"
 
 
-{-| This must match the topic for a supervised Phoenix channel on the Elixir side.
+{-| This must match the topic for the Phoenix channel on the Elixir side.
 We use the same topic for configuring and returning GraphQL subscription messages.
 -}
 channelTopic : String
