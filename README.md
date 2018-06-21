@@ -35,14 +35,22 @@ and install the package with elm-github-install.
 * The `order` field is an auto-incremented (`:serial`) integer.
 
 
-## Sending GraphQL Documents on Websockets
+## Elm - Absinthe Transport over a Phoenix Channel
 
+The Phoenix side sets up a `DocChannel` channel module for the topic "\*"
+that is largely based on (meaning lots of code copying from) `Absinthe.Phoenix.Channel`.
 
-Cobbled together a Phoenix channel handler based on Absinthe.Phoenix.Channel.
+Using the elm-phoenix client package, the Elm frontend joins this "\*" topic at startup.
 
-We send a "doc" event to the channel to make an Absinthe query or mutation.
+Elm sends a "doc" event to the channel to make an Absinthe query or mutation, and
+receives the data or error reply as constructed by Absinthe.
 
-Also the channel has pubsub setup, so that it can be connected to by GraphiQL.
+Elm also handles the "addedItem", etc events on the channel that are put there by
+the Absinthe subscriptions and triggers or explicit calls to `Absinthe.Subscription.publish`
+in the resolver code.
+
+Also, this "\*" channel has pubsub, so that subscriptions can also be subscribed to it
+by GraphiQL "on the fly".
 
 
 ## Bugs / TODO
@@ -56,7 +64,7 @@ by using Absinthe subscriptions if the backend store is modified by other users.
 Hoping to find a clean implementation of this kind of syncing somewhere.
 
 
-## Phoenix/Absinthe Info
+## Phoenix / Absinthe Info
 
 To start your Phoenix server:
 
