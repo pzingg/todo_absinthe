@@ -1,7 +1,10 @@
 defmodule TodoAbsintheWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :todo_absinthe
+  use Absinthe.Phoenix.Endpoint
 
   socket "/socket", TodoAbsintheWeb.UserSocket
+
+  plug CORSPlug
 
   # Serve at "/" the static files from "priv/static" directory.
   #

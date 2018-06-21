@@ -11,4 +11,10 @@ defmodule TodoAbsintheWeb.Schema.ContentTypes do
     field :updated_at, non_null(:datetime)
   end
 
+  input_object :todo_input do
+    field :id, :string
+    field :title, non_null(:string)
+    field :completed, non_null(:boolean)
+  end
+
 end

@@ -20,21 +20,34 @@ import Html.Events exposing (..)
 import Html.Keyed as Keyed
 import Html.Lazy exposing (lazy, lazy2)
 import Json.Decode as Json
-import String
+import Json.Decode.Pipeline as Pipeline
+import Json.Encode as Encode
+import Dict exposing (Dict)
 import Task
+import Time exposing (Time)
+import Phoenix
+import Phoenix.Socket as Socket exposing (Socket, AbnormalClose)
+import Phoenix.Channel as Channel exposing (Channel)
+import Phoenix.Presence as Presence exposing (Presence)
+import Phoenix.Push as Push
+import Uuid exposing (Uuid)
+import Random.Pcg exposing (Seed, initialSeed, step)
 
 
-main : Program (Maybe Model) Model Msg
+-- 1.: In your elm code, store the seed and update it every time you create a new Uuid
+
+
+main : Program (Maybe State) Model Msg
 main =
     Html.programWithFlags
         { init = init
         , view = view
         , update = updateWithStorage
-        , subscriptions = \_ -> Sub.none
+        , subscriptions = subscriptions
         }
 
 
-port setStorage : Model -> Cmd msg
+port setStorage : State -> Cmd msg
 
 
 {-| We want to `setStorage` on every update. This function adds the setStorage
@@ -47,7 +60,7 @@ updateWithStorage msg model =
             update msg model
     in
         ( newModel
-        , Cmd.batch [ setStorage newModel, cmds ]
+        , Cmd.batch [ setStorage newModel.state, cmds ]
         )
 
 
@@ -56,11 +69,44 @@ updateWithStorage msg model =
 -- The full application state of our todo app.
 
 
-type alias Model =
+type SocketStatus
+    = SocketInitializing
+    | SocketConnected
+    | SocketDisconnected { code : Int, reason : String, wasClean : Bool }
+    | ScheduledReconnect { time : Time }
+
+
+type ChannelStatus
+    = ChannelInitializing
+    | Joining
+    | Joined Json.Value
+    | Rejoined Json.Value
+    | JoinError Json.Value
+    | Leaving
+    | LeaveError Json.Value
+    | Left Json.Value
+    | Crashed
+    | ChannelDisconnected
+
+
+type alias Presence =
+    Dict String (List Json.Value)
+
+
+type alias State =
     { entries : List Entry
     , field : String
-    , uid : Int
     , visibility : String
+    }
+
+
+type alias Model =
+    { state : State
+    , seed : Maybe Seed
+    , currentTime : Time
+    , socketStatus : SocketStatus
+    , channelStatus : ChannelStatus
+    , presence : Presence
     }
 
 
@@ -68,20 +114,27 @@ type alias Entry =
     { description : String
     , completed : Bool
     , editing : Bool
-    , id : Int
+    , id : String
     }
 
 
-emptyModel : Model
-emptyModel =
+type alias BackendEntry =
+    { id : String
+    , title : String
+    , order : Int
+    , completed : Bool
+    }
+
+
+emptyState : State
+emptyState =
     { entries = []
     , visibility = "All"
     , field = ""
-    , uid = 0
     }
 
 
-newEntry : String -> Int -> Entry
+newEntry : String -> String -> Entry
 newEntry desc id =
     { description = desc
     , completed = False
@@ -90,9 +143,21 @@ newEntry desc id =
     }
 
 
-init : Maybe Model -> ( Model, Cmd Msg )
-init savedModel =
-    Maybe.withDefault emptyModel savedModel ! []
+initModel : State -> Model
+initModel state =
+    { state = state
+    , seed = Nothing
+    , currentTime = 0
+    , socketStatus = SocketInitializing
+    , channelStatus = ChannelInitializing
+    , presence = Dict.empty
+    }
+
+
+init : Maybe State -> ( Model, Cmd Msg )
+init savedState =
+    initModel (Maybe.withDefault emptyState savedState)
+        ! []
 
 
 
@@ -106,14 +171,22 @@ to them.
 type Msg
     = NoOp
     | UpdateField String
-    | EditingEntry Int Bool
-    | UpdateEntry Int String
+    | EditingEntry String Bool
+    | UpdateEntry String String
     | Add
-    | Delete Int
+    | Delete String
     | DeleteComplete
-    | Check Int Bool
+    | Check String Bool
     | CheckAll Bool
     | ChangeVisibility String
+    | Tick Time
+    | SocketClosedAbnormally AbnormalClose
+    | SocketStatusChanged SocketStatus
+    | ChannelStatusChanged ChannelStatus
+    | PresenceChanged Presence
+    | NewEntrySuccess Json.Value
+    | NewEntryError Json.Value
+    | AddedItemEvent Json.Value
 
 
 
@@ -121,26 +194,38 @@ type Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update msg ({ state } as model) =
     case msg of
         NoOp ->
             model ! []
 
         Add ->
-            { model
-                | uid = model.uid + 1
-                , field = ""
-                , entries =
-                    if String.isEmpty model.field then
-                        model.entries
-                    else
-                        model.entries ++ [ newEntry model.field model.uid ]
-            }
-                ! []
+            if String.isEmpty state.field then
+                model ! []
+            else
+                let
+                    ( newModel, uid ) =
+                        makeUuid model
+
+                    newTodo =
+                        newEntry state.field (Uuid.toString uid)
+
+                    newState =
+                        { state
+                            | field = ""
+                            , entries = state.entries ++ [ newTodo ]
+                        }
+                in
+                    { newModel | state = newState }
+                        ! [ pushNewDoc newTodo ]
 
         UpdateField str ->
-            { model | field = str }
-                ! []
+            let
+                newState =
+                    { state | field = str }
+            in
+                { model | state = newState }
+                    ! []
 
         EditingEntry id isEditing ->
             let
@@ -151,9 +236,12 @@ update msg model =
                         t
 
                 focus =
-                    Dom.focus ("todo-" ++ toString id)
+                    Dom.focus ("todo-" ++ id)
+
+                newState =
+                    { state | entries = List.map updateEntry state.entries }
             in
-                { model | entries = List.map updateEntry model.entries }
+                { model | state = newState }
                     ! [ Task.attempt (\_ -> NoOp) focus ]
 
         UpdateEntry id task ->
@@ -163,17 +251,28 @@ update msg model =
                         { t | description = task }
                     else
                         t
+
+                newState =
+                    { state | entries = List.map updateEntry state.entries }
             in
-                { model | entries = List.map updateEntry model.entries }
+                { model | state = newState }
                     ! []
 
         Delete id ->
-            { model | entries = List.filter (\t -> t.id /= id) model.entries }
-                ! []
+            let
+                newState =
+                    { state | entries = List.filter (\t -> t.id /= id) state.entries }
+            in
+                { model | state = newState }
+                    ! []
 
         DeleteComplete ->
-            { model | entries = List.filter (not << .completed) model.entries }
-                ! []
+            let
+                newState =
+                    { state | entries = List.filter (not << .completed) state.entries }
+            in
+                { model | state = newState }
+                    ! []
 
         Check id isCompleted ->
             let
@@ -182,21 +281,214 @@ update msg model =
                         { t | completed = isCompleted }
                     else
                         t
+
+                newState =
+                    { state | entries = List.map updateEntry state.entries }
             in
-                { model | entries = List.map updateEntry model.entries }
+                { model | state = newState }
                     ! []
 
         CheckAll isCompleted ->
             let
                 updateEntry t =
                     { t | completed = isCompleted }
+
+                newState =
+                    { state | entries = List.map updateEntry state.entries }
             in
-                { model | entries = List.map updateEntry model.entries }
+                { model | state = newState }
                     ! []
 
         ChangeVisibility visibility ->
-            { model | visibility = visibility }
+            let
+                newState =
+                    { state | visibility = visibility }
+            in
+                { model | state = newState }
+                    ! []
+
+        Tick time ->
+            { model | currentTime = time }
                 ! []
+
+        SocketClosedAbnormally abnormalClose ->
+            let
+                _ =
+                    Debug.log "SocketClosedAbnormally" abnormalClose
+            in
+                { model
+                    | socketStatus =
+                        ScheduledReconnect
+                            { time = roundDownToSecond (model.currentTime + abnormalClose.reconnectWait)
+                            }
+                }
+                    ! []
+
+        SocketStatusChanged status ->
+            { model | socketStatus = Debug.log "Socket" status }
+                ! []
+
+        ChannelStatusChanged state ->
+            { model | channelStatus = Debug.log "Channel" state }
+                ! []
+
+        PresenceChanged state ->
+            { model | presence = Debug.log "Presence" state }
+                ! []
+
+        NewEntrySuccess payload ->
+            let
+                _ =
+                    Debug.log "NewEntrySuccess" payload
+            in
+                model ! []
+
+        NewEntryError payload ->
+            let
+                _ =
+                    Debug.log "NewEntryError" payload
+            in
+                model ! []
+
+        AddedItemEvent payload ->
+            case Json.decodeValue todoUpdateDecoder (Debug.log "AddedItemEvent" payload) of
+                Ok entries ->
+                    model ! []
+
+                Err err ->
+                    model ! []
+
+
+makeUuid : Model -> ( Model, Uuid )
+makeUuid model =
+    let
+        seed =
+            case model.seed of
+                Just s ->
+                    s
+
+                Nothing ->
+                    model.currentTime |> truncate |> initialSeed
+
+        ( newUuid, newSeed ) =
+            Random.Pcg.step Uuid.uuidGenerator seed
+    in
+        ( { model | seed = Just newSeed }, newUuid )
+
+
+roundDownToSecond : Time -> Time
+roundDownToSecond ms =
+    (ms / 1000) |> truncate |> (*) 1000 |> toFloat
+
+
+todoUpdateDecoder : Json.Decoder (List BackendEntry)
+todoUpdateDecoder =
+    Pipeline.decode BackendEntry
+        |> Pipeline.required "id" Json.string
+        |> Pipeline.required "title" Json.string
+        |> Pipeline.required "order" Json.int
+        |> Pipeline.required "completed" Json.bool
+        |> Json.list
+
+
+
+-- SENDING GRAPHQL
+
+
+{-| Append "/websocket" to the address defined in the Elixir
+TodoAbsintheWeb.Endpoint module.
+-}
+socketAddress : String
+socketAddress =
+    "ws://localhost:4000/socket/websocket"
+
+
+{-| This must match the topic for a supervised Phoenix channel on the Elixir side.
+We use the same topic for configuring and returning GraphQL subscription messages.
+-}
+channelTopic : String
+channelTopic =
+    "*"
+
+
+{-| To send a GraphQL query or mutation, use the event "doc" on the topic "*".
+The payload, as in GraphQL HTTP GET or POST has two components, "variables"
+and "query".
+-}
+pushDoc : List ( String, Json.Value ) -> String -> (Json.Value -> Msg) -> (Json.Value -> Msg) -> Cmd Msg
+pushDoc vars query successHandler errorHandler =
+    let
+        payload =
+            Encode.object
+                [ ( "variables", Encode.object vars )
+                , ( "query", Encode.string query )
+                ]
+    in
+        Push.init channelTopic "doc"
+            |> Push.withPayload payload
+            |> Push.onOk successHandler
+            |> Push.onError errorHandler
+            |> Phoenix.push socketAddress
+
+
+pushNewDoc : Entry -> Cmd Msg
+pushNewDoc { id, description, completed } =
+    let
+        input =
+            Encode.object
+                [ ( "id", Encode.string id )
+                , ( "title", Encode.string description )
+                , ( "completed", Encode.bool completed )
+                ]
+
+        query =
+            "mutation NewDoc($input:TodoInput!) {"
+                ++ " createItem(input:$input) {"
+                ++ " id title order completed insertedAt } }"
+    in
+        pushDoc [ ( "input", input ) ] query NewEntrySuccess NewEntryError
+
+
+
+-- SUBSCRIPTIONS
+
+
+absintheChannel : Channel Msg
+absintheChannel =
+    let
+        presence =
+            Presence.create
+                |> Presence.onChange PresenceChanged
+    in
+        Channel.init channelTopic
+            |> Channel.onRequestJoin (ChannelStatusChanged Joining)
+            |> Channel.onJoin (ChannelStatusChanged << Joined)
+            |> Channel.onRejoin (ChannelStatusChanged << Rejoined)
+            |> Channel.onJoinError (ChannelStatusChanged << JoinError)
+            |> Channel.onLeave (ChannelStatusChanged << Left)
+            |> Channel.onLeaveError (ChannelStatusChanged << LeaveError)
+            |> Channel.onError (ChannelStatusChanged Crashed)
+            |> Channel.onDisconnect (ChannelStatusChanged ChannelDisconnected)
+            |> Channel.withPresence presence
+            |> Channel.on "addedItem" AddedItemEvent
+            |> Channel.withDebug
+
+
+userSocket : Socket Msg
+userSocket =
+    Socket.init socketAddress
+        |> Socket.onOpen (SocketStatusChanged SocketConnected)
+        |> Socket.onClose (SocketStatusChanged << SocketDisconnected)
+        |> Socket.onAbnormalClose SocketClosedAbnormally
+        |> Socket.reconnectTimer (\backoffIteration -> (backoffIteration + 1) * 5000 |> toFloat)
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.batch
+        [ Time.every Time.second Tick
+        , Phoenix.connect userSocket [ absintheChannel ]
+        ]
 
 
 
@@ -204,16 +496,16 @@ update msg model =
 
 
 view : Model -> Html Msg
-view model =
+view { state } =
     div
         [ class "todomvc-wrapper"
         , style [ ( "visibility", "hidden" ) ]
         ]
         [ section
             [ class "todoapp" ]
-            [ lazy viewInput model.field
-            , lazy2 viewEntries model.visibility model.entries
-            , lazy2 viewControls model.visibility model.entries
+            [ lazy viewInput state.field
+            , lazy2 viewEntries state.visibility state.entries
+            , lazy2 viewControls state.visibility state.entries
             ]
         , infoFooter
         ]
@@ -302,7 +594,7 @@ viewEntries visibility entries =
 
 viewKeyedEntry : Entry -> ( String, Html Msg )
 viewKeyedEntry todo =
-    ( toString todo.id, lazy viewEntry todo )
+    ( todo.id, lazy viewEntry todo )
 
 
 viewEntry : Entry -> Html Msg
@@ -331,7 +623,7 @@ viewEntry todo =
             [ class "edit"
             , value todo.description
             , name "title"
-            , id ("todo-" ++ toString todo.id)
+            , id ("todo-" ++ todo.id)
             , onInput (UpdateEntry todo.id)
             , onBlur (EditingEntry todo.id False)
             , onEnter (EditingEntry todo.id False)

@@ -7,7 +7,7 @@ defmodule TodoAbsinthe.Repo.Migrations.CreateTodos do
       add :order, :serial
       add :completed, :boolean, default: false, null: false
 
-      timestamps()
+      timestamps(type: :utc_datetime)
     end
 
   end

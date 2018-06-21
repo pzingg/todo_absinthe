@@ -12,6 +12,8 @@ defmodule TodoAbsinthe.Application do
       supervisor(TodoAbsinthe.Repo, []),
       # Start the endpoint when the application starts
       supervisor(TodoAbsintheWeb.Endpoint, []),
+      # Support Absinthe subscriptions at the endpoint
+      supervisor(Absinthe.Subscription, [TodoAbsintheWeb.Endpoint]),
       # Start your own worker by calling: TodoAbsinthe.Worker.start_link(arg1, arg2, arg3)
       # worker(TodoAbsinthe.Worker, [arg1, arg2, arg3]),
     ]

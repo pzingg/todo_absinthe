@@ -13,14 +13,27 @@ defmodule TodoAbsintheWeb.Router do
     plug :accepts, ["json"]
   end
 
+  scope "/api" do
+    pipe_through :api
+
+    forward "/", Absinthe.Plug,
+      schema: TodoAbsintheWeb.Schema
+  end
+
+  scope "/graphiql" do
+    pipe_through :api
+
+    forward "/", Absinthe.Plug.GraphiQL,
+      schema: TodoAbsintheWeb.Schema,
+      interface: :simple,
+      socket: TodoAbsintheWeb.UserSocket
+  end
+
+  # Main route to render Elm frontend
+  # Use the default browser stack
   scope "/", TodoAbsintheWeb do
-    pipe_through :browser # Use the default browser stack
+    pipe_through :browser
 
     get "/", PageController, :index
   end
-
-  # Other scopes may use custom stacks.
-  # scope "/api", TodoAbsintheWeb do
-  #   pipe_through :api
-  # end
 end

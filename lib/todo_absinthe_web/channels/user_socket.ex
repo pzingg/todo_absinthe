@@ -1,8 +1,9 @@
 defmodule TodoAbsintheWeb.UserSocket do
   use Phoenix.Socket
+  use Absinthe.Phoenix.Socket, schema: TodoAbsintheWeb.Schema
 
   ## Channels
-  # channel "room:*", TodoAbsintheWeb.RoomChannel
+  channel "*", TodoAbsintheWeb.DocChannel
 
   ## Transports
   transport :websocket, Phoenix.Transports.WebSocket
