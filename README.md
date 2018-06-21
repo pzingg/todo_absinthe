@@ -32,7 +32,11 @@ and install the package with elm-github-install.
 
 * PostgreSQL database with a todos table.
 * Using string UUIDs for ids (configured in config/config.exs).
-* The `order` field is an auto-incremented (`:serial`) integer.
+* The `order` field (part of the TodoMVC spec) is an auto-incremented (`:serial`) integer.
+In the Elm TodoMVC implementation, this field was omitted.
+* Have to use the `read_after_writes` option (PostgreSQL-specific) to grab DB values
+after insert/update operations in order to return the `order` field to the Absinthe
+reply correctly.
 
 
 ## Elm - Absinthe Transport over a Phoenix Channel
