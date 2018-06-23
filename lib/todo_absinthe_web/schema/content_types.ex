@@ -13,8 +13,8 @@ defmodule TodoAbsintheWeb.Schema.ContentTypes do
 
   input_object :todo_input do
     field :id, :string
-    field :title, non_null(:string)
-    field :completed, non_null(:boolean)
+    field :title, :string
+    field :completed, :boolean
   end
 
 end

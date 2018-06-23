@@ -14,6 +14,13 @@ defmodule TodoAbsinthe.Todo.Item do
   end
 
   @doc false
+  def changeset_for_create(item, attrs) do
+    item
+    |> cast(attrs, [:id, :title, :order, :completed])
+    |> validate_required([:title, :completed])
+  end
+
+  @doc false
   def changeset(item, attrs) do
     item
     |> cast(attrs, [:title, :order, :completed])

@@ -94,6 +94,11 @@ type alias Presence =
     Dict String (List Json.Value)
 
 
+type ReplyStatus
+    = ReplyOk
+    | ReplyErr
+
+
 {-| UI state.
 -}
 type alias State =
@@ -191,9 +196,12 @@ type Msg
     | SocketStatusChanged SocketStatus
     | ChannelStatusChanged ChannelStatus
     | PresenceChanged Presence
-    | NewEntrySuccess Json.Value
-    | NewEntryError Json.Value
-    | AddedItemEvent Json.Value
+    | CreateItemReply ReplyStatus Json.Value
+    | UpdateBatchReply ReplyStatus Json.Value
+    | DeleteBatchReply ReplyStatus Json.Value
+    | ItemsCreated Json.Value
+    | ItemsUpdated Json.Value
+    | ItemsDeleted Json.Value
 
 
 
@@ -205,26 +213,6 @@ update msg ({ state } as model) =
     case msg of
         NoOp ->
             model ! []
-
-        Add ->
-            if String.isEmpty state.field then
-                model ! []
-            else
-                let
-                    ( newModel, uid ) =
-                        makeUuid model
-
-                    newTodo =
-                        newEntry state.field (Uuid.toString uid)
-
-                    newState =
-                        { state
-                            | field = ""
-                            , entries = state.entries ++ [ newTodo ]
-                        }
-                in
-                    { newModel | state = newState }
-                        ! [ pushNewDoc newTodo ]
 
         UpdateField str ->
             let
@@ -251,6 +239,34 @@ update msg ({ state } as model) =
                 { model | state = newState }
                     ! [ Task.attempt (\_ -> NoOp) focus ]
 
+        ChangeVisibility visibility ->
+            let
+                newState =
+                    { state | visibility = visibility }
+            in
+                { model | state = newState }
+                    ! []
+
+        Add ->
+            if String.isEmpty state.field then
+                model ! []
+            else
+                let
+                    ( newModel, uid ) =
+                        makeUuid model
+
+                    newTodo =
+                        newEntry state.field (Uuid.toString uid)
+
+                    newState =
+                        { state
+                            | field = ""
+                            , entries = state.entries ++ [ newTodo ]
+                        }
+                in
+                    { newModel | state = newState }
+                        ! [ createItemMutation newTodo ]
+
         UpdateEntry id task ->
             let
                 updateEntry t =
@@ -263,23 +279,7 @@ update msg ({ state } as model) =
                     { state | entries = List.map updateEntry state.entries }
             in
                 { model | state = newState }
-                    ! []
-
-        Delete id ->
-            let
-                newState =
-                    { state | entries = List.filter (\t -> t.id /= id) state.entries }
-            in
-                { model | state = newState }
-                    ! []
-
-        DeleteComplete ->
-            let
-                newState =
-                    { state | entries = List.filter (not << .completed) state.entries }
-            in
-                { model | state = newState }
-                    ! []
+                    ! [ updateTitleMutation id task ]
 
         Check id isCompleted ->
             let
@@ -293,7 +293,7 @@ update msg ({ state } as model) =
                     { state | entries = List.map updateEntry state.entries }
             in
                 { model | state = newState }
-                    ! []
+                    ! [ updateCompletedMutation [ id ] isCompleted ]
 
         CheckAll isCompleted ->
             let
@@ -304,15 +304,26 @@ update msg ({ state } as model) =
                     { state | entries = List.map updateEntry state.entries }
             in
                 { model | state = newState }
-                    ! []
+                    ! [ updateCompletedMutation (List.map .id newState.entries) isCompleted ]
 
-        ChangeVisibility visibility ->
+        Delete id ->
             let
                 newState =
-                    { state | visibility = visibility }
+                    { state | entries = List.filter (\t -> t.id /= id) state.entries }
             in
                 { model | state = newState }
-                    ! []
+                    ! [ deleteBatchMutation [ id ] ]
+
+        DeleteComplete ->
+            let
+                ( completed, uncompleted ) =
+                    List.partition .completed state.entries
+
+                newState =
+                    { state | entries = uncompleted }
+            in
+                { model | state = newState }
+                    ! [ deleteBatchMutation (List.map .id completed) ]
 
         Tick time ->
             { model | currentTime = time }
@@ -343,22 +354,45 @@ update msg ({ state } as model) =
             { model | presence = Debug.log "Presence" state }
                 ! []
 
-        NewEntrySuccess payload ->
+        CreateItemReply status reply ->
             let
                 _ =
-                    Debug.log "NewEntrySuccess" payload
+                    Debug.log "CreateItemReply" reply
             in
                 model ! []
 
-        NewEntryError payload ->
+        UpdateBatchReply status reply ->
             let
                 _ =
-                    Debug.log "NewEntryError" payload
+                    Debug.log "UpdateBatchReply" reply
             in
                 model ! []
 
-        AddedItemEvent payload ->
-            case Json.decodeValue todoUpdateDecoder (Debug.log "AddedItemEvent" payload) of
+        DeleteBatchReply status reply ->
+            let
+                _ =
+                    Debug.log "DeleteBatchReply" reply
+            in
+                model ! []
+
+        ItemsCreated payload ->
+            case Json.decodeValue todoUpdateDecoder (Debug.log "ItemsCreated" payload) of
+                Ok entries ->
+                    model ! []
+
+                Err err ->
+                    model ! []
+
+        ItemsUpdated payload ->
+            case Json.decodeValue todoUpdateDecoder (Debug.log "ItemsUpdated" payload) of
+                Ok entries ->
+                    model ! []
+
+                Err err ->
+                    model ! []
+
+        ItemsDeleted payload ->
+            case Json.decodeValue todoUpdateDecoder (Debug.log "ItemsDeleted" payload) of
                 Ok entries ->
                     model ! []
 
@@ -422,8 +456,8 @@ channelTopic =
 The payload, as in GraphQL HTTP GET or POST has two components, "variables"
 and "query".
 -}
-pushDoc : List ( String, Json.Value ) -> String -> (Json.Value -> Msg) -> (Json.Value -> Msg) -> Cmd Msg
-pushDoc vars query successHandler errorHandler =
+pushDoc : List ( String, Json.Value ) -> String -> (ReplyStatus -> Json.Value -> Msg) -> Cmd Msg
+pushDoc vars query replyHandler =
     let
         payload =
             Encode.object
@@ -433,13 +467,13 @@ pushDoc vars query successHandler errorHandler =
     in
         Push.init channelTopic "doc"
             |> Push.withPayload payload
-            |> Push.onOk successHandler
-            |> Push.onError errorHandler
+            |> Push.onOk (replyHandler ReplyOk)
+            |> Push.onError (replyHandler ReplyErr)
             |> Phoenix.push socketAddress
 
 
-pushNewDoc : Entry -> Cmd Msg
-pushNewDoc { id, description, completed } =
+createItemMutation : Entry -> Cmd Msg
+createItemMutation { id, description, completed } =
     let
         input =
             Encode.object
@@ -449,11 +483,68 @@ pushNewDoc { id, description, completed } =
                 ]
 
         query =
-            "mutation NewDoc($input:TodoInput!) {"
+            "mutation CreateTodo($input:TodoInput!) {"
                 ++ " createItem(input:$input) {"
                 ++ " id title order completed insertedAt } }"
     in
-        pushDoc [ ( "input", input ) ] query NewEntrySuccess NewEntryError
+        pushDoc [ ( "input", input ) ] query CreateItemReply
+
+
+updateTitleMutation : String -> String -> Cmd Msg
+updateTitleMutation id description =
+    let
+        encodeEntry =
+            Encode.object
+                [ ( "id", Encode.string id )
+                , ( "title", Encode.string description )
+                ]
+
+        input =
+            [ encodeEntry ]
+                |> Encode.list
+
+        query =
+            "mutation UpdateTitle($input:TodoInput!) {"
+                ++ " updateBatch(input:$input) {"
+                ++ " id title order completed insertedAt } }"
+    in
+        pushDoc [ ( "input", input ) ] query UpdateBatchReply
+
+
+updateCompletedMutation : List String -> Bool -> Cmd Msg
+updateCompletedMutation idList completed =
+    let
+        encodeEntry id =
+            Encode.object
+                [ ( "id", Encode.string id )
+                , ( "completed", Encode.bool completed )
+                ]
+
+        input =
+            List.map encodeEntry idList
+                |> Encode.list
+
+        query =
+            "mutation UpdateCompleted($input:[TodoInput]!) {"
+                ++ " updateBatch(input:$input) {"
+                ++ " id title order completed insertedAt } }"
+    in
+        pushDoc [ ( "input", input ) ] query UpdateBatchReply
+
+
+deleteBatchMutation : List String -> Cmd Msg
+deleteBatchMutation idList =
+    let
+        ids =
+            List.map Encode.string idList
+                |> Encode.list
+
+        query =
+            "mutation DeleteBatch($ids:[String]!) {"
+                ++ " deleteBatch(ids:$ids) {"
+                ++ " id title order completed insertedAt } }"
+    in
+        pushDoc [ ( "ids", ids ) ] query DeleteBatchReply
 
 
 
@@ -477,7 +568,9 @@ absintheChannel =
             |> Channel.onError (ChannelStatusChanged Crashed)
             |> Channel.onDisconnect (ChannelStatusChanged ChannelDisconnected)
             |> Channel.withPresence presence
-            |> Channel.on "addedItem" AddedItemEvent
+            |> Channel.on "itemsCreated" ItemsCreated
+            |> Channel.on "itemsUpdated" ItemsUpdated
+            |> Channel.on "itemsDeleted" ItemsDeleted
             |> Channel.withDebug
 
 

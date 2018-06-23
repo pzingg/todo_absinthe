@@ -5,7 +5,6 @@ defmodule TodoAbsinthe.Todo do
 
   import Ecto.Query, warn: false
   alias TodoAbsinthe.Repo
-
   alias TodoAbsinthe.Todo.Item
 
   @doc """
@@ -51,7 +50,7 @@ defmodule TodoAbsinthe.Todo do
   """
   def create_item(attrs \\ %{}) do
     %Item{}
-    |> Item.changeset(attrs)
+    |> Item.changeset_for_create(attrs)
     |> Repo.insert()
   end
 
