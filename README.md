@@ -26,7 +26,8 @@ elm-package.json file:
 }
 ```
 
-and install the package with [elm-github-install](https://github.com/gdotdesign/elm-github-install).
+and install the package with the
+[elm-github-install package manager](https://github.com/gdotdesign/elm-github-install).
 
 
 ## Ecto Notes
