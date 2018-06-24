@@ -69,7 +69,10 @@ The `subscription:data` payloads include two components:
 * `subscriptionId` - the same id used for the topic.
 * `result` - a JSON value containing the standard GraphQL `data` reply.
 
-More detailed comments can be found in the Todo.elm source file.
+More detailed comments can be found in the Todo.elm source file. The footer in the
+user interface has a clickable link for exercising the pubsub. Clicking the link
+will either subscribe to the subscriptions "itemsCreated", "itemsUpdated" and "itemsDeleted",
+or unsubscribe from them.
 
 
 ## Bugs / TODO

@@ -108,6 +108,12 @@ type alias State =
     }
 
 
+type alias SubscriptionChannel =
+    { subscriptionId : String
+    , channel : Channel Msg
+    }
+
+
 type alias Model =
     { state : State
     , seed : Maybe Seed
@@ -115,7 +121,7 @@ type alias Model =
     , socketStatus : SocketStatus
     , channelStatus : ChannelStatus
     , presence : Presence
-    , itemsChannels : Dict String (Channel Msg)
+    , subscriptionChannels : Dict String SubscriptionChannel
     }
 
 
@@ -164,7 +170,7 @@ initModel state =
     , socketStatus = SocketInitializing
     , channelStatus = ChannelInitializing
     , presence = Dict.empty
-    , itemsChannels = Dict.empty
+    , subscriptionChannels = Dict.empty
     }
 
 
@@ -193,6 +199,7 @@ type Msg
     | Check String Bool
     | CheckAll Bool
     | ChangeVisibility String
+    | ToggleSubscriptions
     | Tick Time
     | SocketClosedAbnormally AbnormalClose
     | SocketStatusChanged SocketStatus
@@ -202,6 +209,7 @@ type Msg
     | CreateItemReply ReplyStatus Json.Value
     | UpdateBatchReply ReplyStatus Json.Value
     | DeleteBatchReply ReplyStatus Json.Value
+    | Unsubscribed ReplyStatus Json.Value
     | SubscriptionData String Json.Value
 
 
@@ -247,6 +255,16 @@ update msg ({ state } as model) =
             in
                 { model | state = newState }
                     ! []
+
+        ToggleSubscriptions ->
+            let
+                ( nextModel, commands ) =
+                    if Dict.isEmpty model.subscriptionChannels then
+                        subscribeAll model
+                    else
+                        unsubscribeAll model
+            in
+                nextModel ! commands
 
         Add ->
             if String.isEmpty state.field then
@@ -349,23 +367,19 @@ update msg ({ state } as model) =
 
         ChannelStatusChanged status ->
             let
-                subscribeCmds =
+                ( nextModel, subscriptionCmds ) =
                     case status of
                         Joined _ ->
-                            -- When we have successfully joined the "*" channel on our socket, we must
-                            -- set up the GraphQL subscription topics. First we send subscription documents,
-                            -- then parse the replies to extract subscriptionIds, then create channels that
-                            -- will receive the subscription data event messages.
-                            [ itemsSubscription "itemsCreated"
-                            , itemsSubscription "itemsUpdated"
-                            , itemsSubscription "itemsDeleted"
-                            ]
+                            subscribeAll model
+
+                        Left _ ->
+                            unsubscribeAll model
 
                         _ ->
-                            []
+                            ( model, [] )
             in
-                { model | channelStatus = Debug.log "Channel" status }
-                    ! subscribeCmds
+                { nextModel | channelStatus = Debug.log "Channel" status }
+                    ! subscriptionCmds
 
         PresenceChanged state ->
             { model | presence = Debug.log "Presence" state }
@@ -377,14 +391,14 @@ update msg ({ state } as model) =
                     Debug.log "SubscriptionReply" ( name, status, reply )
 
                 newChannels =
-                    case itemsSubscriptionChannel status name reply of
+                    case subscribeTopicChannel status name reply of
                         Just channel ->
-                            Dict.insert name channel model.itemsChannels
+                            Dict.insert name channel model.subscriptionChannels
 
                         Nothing ->
-                            model.itemsChannels
+                            model.subscriptionChannels
             in
-                { model | itemsChannels = newChannels } ! []
+                { model | subscriptionChannels = newChannels } ! []
 
         CreateItemReply status reply ->
             let
@@ -407,6 +421,13 @@ update msg ({ state } as model) =
                 _ =
                     Debug.log "DeleteBatchReply"
                         ( status, Json.decodeValue (listResultDataDecoder "deleteBatch") reply )
+            in
+                model ! []
+
+        Unsubscribed status reply ->
+            let
+                _ =
+                    Debug.log "Unsubscribed" ( status, reply )
             in
                 model ! []
 
@@ -497,6 +518,26 @@ makeUuid model =
 roundDownToSecond : Time -> Time
 roundDownToSecond ms =
     (ms / 1000) |> truncate |> (*) 1000 |> toFloat
+
+
+{-| When we have successfully joined the "*" channel on our socket, we must
+set up the GraphQL subscription topics. First we send subscription documents,
+then parse the replies to extract subscriptionIds, then create channels that
+will receive the subscription data event messages.
+-}
+subscribeAll : Model -> ( Model, List (Cmd Msg) )
+subscribeAll model =
+    ( model, List.map subscribeTopic [ "itemsCreated", "itemsUpdated", "itemsDeleted" ] )
+
+
+unsubscribeAll : Model -> ( Model, List (Cmd Msg) )
+unsubscribeAll model =
+    let
+        commands =
+            Dict.values model.subscriptionChannels
+                |> List.map (.subscriptionId >> unsubscribeTopic)
+    in
+        ( { model | subscriptionChannels = Dict.empty }, commands )
 
 
 
@@ -602,13 +643,27 @@ deleteBatchMutation idList =
 After sending a subscription document to Absinthe to let the server set up a pubsub
 for the GraphQL subscription, the server will reply with the subscriptionId in the reply payload.
 -}
-itemsSubscription : String -> Cmd Msg
-itemsSubscription name =
+subscribeTopic : String -> Cmd Msg
+subscribeTopic name =
     let
         query =
             "subscription { " ++ name ++ " { id title order completed insertedAt } }"
     in
         pushDoc [] query (SubscriptionReply name)
+
+
+unsubscribeTopic : String -> Cmd Msg
+unsubscribeTopic subscriptionId =
+    let
+        payload =
+            Encode.object
+                [ ( "subscriptionId", Encode.string subscriptionId ) ]
+    in
+        Push.init baseTopic "unsubscribe"
+            |> Push.withPayload payload
+            |> Push.onOk (Unsubscribed ReplyOk)
+            |> Push.onError (Unsubscribed ReplyOk)
+            |> Phoenix.push socketAddress
 
 
 
@@ -741,14 +796,17 @@ for the GraphQL subscription, the server replies with the subscriptionId in the 
 To get data on this subscription, we need to open a new channel with the subscriptionId
 as the topic, and listen for "subscription:data" events on it.
 -}
-itemsSubscriptionChannel : ReplyStatus -> String -> Json.Value -> Maybe (Channel Msg)
-itemsSubscriptionChannel status name reply =
+subscribeTopicChannel : ReplyStatus -> String -> Json.Value -> Maybe SubscriptionChannel
+subscribeTopicChannel status name reply =
     case ( status, Json.decodeValue subscriptionReplyDecoder reply ) of
         ( ReplyOk, Ok subscriptionId ) ->
-            Channel.init subscriptionId
-                |> Channel.withDebug
-                |> Channel.on "subscription:data" (SubscriptionData name)
-                |> Just
+            let
+                channel =
+                    Channel.init subscriptionId
+                        |> Channel.withDebug
+                        |> Channel.on "subscription:data" (SubscriptionData name)
+            in
+                Just { subscriptionId = subscriptionId, channel = channel }
 
         _ ->
             Nothing
@@ -758,11 +816,17 @@ itemsSubscriptionChannel status name reply =
 -- SUBSCRIPTIONS
 
 
+extraChannels : Model -> List (Channel Msg)
+extraChannels model =
+    Dict.values model.subscriptionChannels
+        |> List.map .channel
+
+
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
         [ Time.every Time.second Tick
-        , Phoenix.connect userSocket <| baseChannel :: Dict.values model.itemsChannels
+        , Phoenix.connect userSocket (baseChannel :: extraChannels model)
         ]
 
 
@@ -771,7 +835,7 @@ subscriptions model =
 
 
 view : Model -> Html Msg
-view { state } =
+view ({ state } as model) =
     div
         [ class "todomvc-wrapper"
         , style [ ( "visibility", "hidden" ) ]
@@ -782,7 +846,7 @@ view { state } =
             , lazy2 viewEntries state.visibility state.entries
             , lazy2 viewControls state.visibility state.entries
             ]
-        , infoFooter
+        , infoFooter model
         ]
 
 
@@ -978,10 +1042,22 @@ viewControlsClear entriesCompleted =
         ]
 
 
-infoFooter : Html msg
-infoFooter =
+infoFooter : Model -> Html Msg
+infoFooter model =
     footer [ class "info" ]
         [ p [] [ text "Double-click to edit a todo" ]
+        , p []
+            [ a
+                [ href "#"
+                , onClick ToggleSubscriptions
+                ]
+                [ text <|
+                    if Dict.isEmpty model.subscriptionChannels then
+                        "Click me to subscribe"
+                    else
+                        "Click me to unsubscribe"
+                ]
+            ]
         , p []
             [ text "Written by "
             , a [ href "https://github.com/evancz" ] [ text "Evan Czaplicki" ]
