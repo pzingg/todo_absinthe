@@ -390,7 +390,7 @@ update msg ({ state } as model) =
             let
                 _ =
                     Debug.log "CreateItemReply"
-                        ( status, Json.decodeValue (itemMutationDataDecoder "createItem") reply )
+                        ( status, Json.decodeValue (itemResultDataDecoder "createItem") reply )
             in
                 model ! []
 
@@ -398,7 +398,7 @@ update msg ({ state } as model) =
             let
                 _ =
                     Debug.log "UpdateBatchReply"
-                        ( status, Json.decodeValue (listMutationDataDecoder "updateBatch") reply )
+                        ( status, Json.decodeValue (listResultDataDecoder "updateBatch") reply )
             in
                 model ! []
 
@@ -406,12 +406,12 @@ update msg ({ state } as model) =
             let
                 _ =
                     Debug.log "DeleteBatchReply"
-                        ( status, Json.decodeValue (listMutationDataDecoder "deleteBatch") reply )
+                        ( status, Json.decodeValue (listResultDataDecoder "deleteBatch") reply )
             in
                 model ! []
 
         SubscriptionData name payload ->
-            case Json.decodeValue (itemsSubscriptionDataDecoder name) payload of
+            case Json.decodeValue (listSubscriptionDataDecoder name) payload of
                 Ok items ->
                     let
                         _ =
@@ -636,8 +636,8 @@ listOfTodoDecoder =
 We use this decoder for single todo item results.
 
 -}
-itemMutationDataDecoder : String -> Json.Decoder BackendEntry
-itemMutationDataDecoder name =
+itemResultDataDecoder : String -> Json.Decoder BackendEntry
+itemResultDataDecoder name =
     Json.at [ "data", name ] todoDecoder
 
 
@@ -648,14 +648,14 @@ itemMutationDataDecoder name =
 We use this decoder for list of todo item results.
 
 -}
-listMutationDataDecoder : String -> Json.Decoder (List BackendEntry)
-listMutationDataDecoder name =
+listResultDataDecoder : String -> Json.Decoder (List BackendEntry)
+listResultDataDecoder name =
     Json.at [ "data", name ] listOfTodoDecoder
 
 
 {-| Absinthe "subscription:data" messages have a payload that looks like this:
 
-    { "subscriptionId":"**absinthe**:doc:87829607",
+    { "subscriptionId":"__absinthe__:doc:87829607",
       "result": {
         "data": {
           "itemsDeleted": [
@@ -665,13 +665,13 @@ listMutationDataDecoder name =
        }
     }
 
-Our subscriptions always send a list of todo items. We fetch the contents of
-[ "result", "data", <subscription name>] and then decode the list of todo items there.
+Our subscriptions always send a list of todo items. We fetch the contents at
+"result", and then decode the list of todo items there.
 
 -}
-itemsSubscriptionDataDecoder : String -> Json.Decoder (List BackendEntry)
-itemsSubscriptionDataDecoder name =
-    Json.at [ "result", "data", name ] listOfTodoDecoder
+listSubscriptionDataDecoder : String -> Json.Decoder (List BackendEntry)
+listSubscriptionDataDecoder name =
+    Json.at [ "result" ] (listResultDataDecoder name)
 
 
 {-| The payload of the reply for our subscription document just has a single

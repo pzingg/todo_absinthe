@@ -49,12 +49,27 @@ Using the elm-phoenix client package, the Elm frontend joins this "\*" topic at 
 Elm sends a "doc" event to the channel to make an Absinthe query or mutation, and
 receives the data or error reply as constructed by Absinthe.
 
-Elm also handles the "addedItem", etc events on the channel that are put there by
-the Absinthe subscriptions and triggers or explicit calls to `Absinthe.Subscription.publish`
-in the resolver code.
+Elm should be able to handle the "itemsCreated", etc. GraphQL subscription messages
+published or triggered by Absinthe on the "\*" topic, but these are apparently not
+happening automatically as events on the "\*" topic.
 
-Also, this "\*" channel has pubsub, so that subscriptions can also be subscribed to it
-by GraphiQL "on the fly".
+The "\*" channel has pubsub, so that subscriptions can also be subscribed to it
+by GraphiQL "on the fly". Following the protocol used by GraphiQL, we subscribe to
+subscription messsages in Elm as follows:
+
+1. Push a subscription document, using the subscription name (e.g. "itemsCreated"), and
+specifying the fields of interest, to the "\*" topic. The payload of the reply
+will contain a `subscriptionId` string, like "\_\_absinthe\_\_:doc:87829607".
+2. Create a new client channel, in addition to the original "\*" channel,
+using the `subscriptionId` string as the topic, and listening for `subscription:data` events.
+3. Receive and decode incoming `subscription:data` payloads.
+
+The `subscription:data` payloads include two components:
+
+* `subscriptionId` - the same id used for the topic.
+* `result` - a JSON value containing the standard GraphQL `data` reply.
+
+More detailed comments can be found in the Todo.elm source file.
 
 
 ## Bugs / TODO
