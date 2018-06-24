@@ -115,6 +115,7 @@ type alias Model =
     , socketStatus : SocketStatus
     , channelStatus : ChannelStatus
     , presence : Presence
+    , itemsChannels : Dict String (Channel Msg)
     }
 
 
@@ -146,10 +147,10 @@ emptyState =
     }
 
 
-newEntry : String -> String -> Entry
-newEntry desc id =
+newEntry : String -> String -> Bool -> Entry
+newEntry id desc comp =
     { description = desc
-    , completed = False
+    , completed = comp
     , editing = False
     , id = id
     }
@@ -163,6 +164,7 @@ initModel state =
     , socketStatus = SocketInitializing
     , channelStatus = ChannelInitializing
     , presence = Dict.empty
+    , itemsChannels = Dict.empty
     }
 
 
@@ -196,12 +198,11 @@ type Msg
     | SocketStatusChanged SocketStatus
     | ChannelStatusChanged ChannelStatus
     | PresenceChanged Presence
+    | SubscriptionReply String ReplyStatus Json.Value
     | CreateItemReply ReplyStatus Json.Value
     | UpdateBatchReply ReplyStatus Json.Value
     | DeleteBatchReply ReplyStatus Json.Value
-    | ItemsCreated Json.Value
-    | ItemsUpdated Json.Value
-    | ItemsDeleted Json.Value
+    | SubscriptionData String Json.Value
 
 
 
@@ -256,7 +257,7 @@ update msg ({ state } as model) =
                         makeUuid model
 
                     newTodo =
-                        newEntry state.field (Uuid.toString uid)
+                        newEntry (Uuid.toString uid) state.field False
 
                     newState =
                         { state
@@ -346,58 +347,134 @@ update msg ({ state } as model) =
             { model | socketStatus = Debug.log "Socket" status }
                 ! []
 
-        ChannelStatusChanged state ->
-            { model | channelStatus = Debug.log "Channel" state }
-                ! []
+        ChannelStatusChanged status ->
+            let
+                subscribeCmds =
+                    case status of
+                        Joined _ ->
+                            -- When we have successfully joined the "*" channel on our socket, we must
+                            -- set up the GraphQL subscription topics. First we send subscription documents,
+                            -- then parse the replies to extract subscriptionIds, then create channels that
+                            -- will receive the subscription data event messages.
+                            [ itemsSubscription "itemsCreated"
+                            , itemsSubscription "itemsUpdated"
+                            , itemsSubscription "itemsDeleted"
+                            ]
+
+                        _ ->
+                            []
+            in
+                { model | channelStatus = Debug.log "Channel" status }
+                    ! subscribeCmds
 
         PresenceChanged state ->
             { model | presence = Debug.log "Presence" state }
                 ! []
 
+        SubscriptionReply name status reply ->
+            let
+                _ =
+                    Debug.log "SubscriptionReply" ( name, status, reply )
+
+                newChannels =
+                    case itemsSubscriptionChannel status name reply of
+                        Just channel ->
+                            Dict.insert name channel model.itemsChannels
+
+                        Nothing ->
+                            model.itemsChannels
+            in
+                { model | itemsChannels = newChannels } ! []
+
         CreateItemReply status reply ->
             let
                 _ =
-                    Debug.log "CreateItemReply" reply
+                    Debug.log "CreateItemReply"
+                        ( status, Json.decodeValue (itemMutationDataDecoder "createItem") reply )
             in
                 model ! []
 
         UpdateBatchReply status reply ->
             let
                 _ =
-                    Debug.log "UpdateBatchReply" reply
+                    Debug.log "UpdateBatchReply"
+                        ( status, Json.decodeValue (listMutationDataDecoder "updateBatch") reply )
             in
                 model ! []
 
         DeleteBatchReply status reply ->
             let
                 _ =
-                    Debug.log "DeleteBatchReply" reply
+                    Debug.log "DeleteBatchReply"
+                        ( status, Json.decodeValue (listMutationDataDecoder "deleteBatch") reply )
             in
                 model ! []
 
-        ItemsCreated payload ->
-            case Json.decodeValue todoUpdateDecoder (Debug.log "ItemsCreated" payload) of
-                Ok entries ->
-                    model ! []
+        SubscriptionData name payload ->
+            case Json.decodeValue (itemsSubscriptionDataDecoder name) payload of
+                Ok items ->
+                    let
+                        _ =
+                            Debug.log "SubscriptionData" ( name, items )
+
+                        newEntries =
+                            case name of
+                                "itemsCreated" ->
+                                    updateAndAddItems items state.entries
+
+                                "itemsUpdated" ->
+                                    updateAndAddItems items state.entries
+
+                                "itemsDeleted" ->
+                                    List.filter
+                                        (\entry ->
+                                            not <|
+                                                List.any (\{ id } -> id == entry.id) items
+                                        )
+                                        state.entries
+
+                                _ ->
+                                    state.entries
+
+                        newState =
+                            { state | entries = newEntries }
+                    in
+                        { model | state = newState }
+                            ! []
 
                 Err err ->
-                    model ! []
+                    let
+                        _ =
+                            Debug.log "ItemsCreated" err
+                    in
+                        model ! []
 
-        ItemsUpdated payload ->
-            case Json.decodeValue todoUpdateDecoder (Debug.log "ItemsUpdated" payload) of
-                Ok entries ->
-                    model ! []
 
-                Err err ->
-                    model ! []
+updatedEntries : List BackendEntry -> Entry -> List Entry -> List Entry
+updatedEntries items entry acc =
+    case List.filter (\{ id } -> id == entry.id) items of
+        [] ->
+            acc ++ [ entry ]
 
-        ItemsDeleted payload ->
-            case Json.decodeValue todoUpdateDecoder (Debug.log "ItemsDeleted" payload) of
-                Ok entries ->
-                    model ! []
+        item :: _ ->
+            acc ++ [ newEntry entry.id item.title item.completed ]
 
-                Err err ->
-                    model ! []
+
+newEntries : BackendEntry -> List Entry -> List Entry
+newEntries item acc =
+    if List.any (\{ id } -> id == item.id) acc then
+        acc
+    else
+        acc ++ [ newEntry item.id item.title item.completed ]
+
+
+updateAndAddItems : List BackendEntry -> List Entry -> List Entry
+updateAndAddItems items entries =
+    let
+        changedEntries =
+            List.foldl (updatedEntries items) [] entries
+    in
+        List.foldl newEntries changedEntries items
 
 
 makeUuid : Model -> ( Model, Uuid )
@@ -422,34 +499,8 @@ roundDownToSecond ms =
     (ms / 1000) |> truncate |> (*) 1000 |> toFloat
 
 
-todoUpdateDecoder : Json.Decoder (List BackendEntry)
-todoUpdateDecoder =
-    Pipeline.decode BackendEntry
-        |> Pipeline.required "id" Json.string
-        |> Pipeline.required "title" Json.string
-        |> Pipeline.required "order" Json.int
-        |> Pipeline.required "completed" Json.bool
-        |> Json.list
 
-
-
--- SENDING GRAPHQL
-
-
-{-| Append "/websocket" to the address defined in the Elixir
-TodoAbsintheWeb.Endpoint module.
--}
-socketAddress : String
-socketAddress =
-    "ws://localhost:4000/socket/websocket"
-
-
-{-| This must match the topic for the Phoenix channel on the Elixir side.
-We use the same topic for configuring and returning GraphQL subscription messages.
--}
-channelTopic : String
-channelTopic =
-    "*"
+-- SENDING ABSINTHE/GRAPHQL DOCUMENTS
 
 
 {-| To send a GraphQL query or mutation, use the event "doc" on the topic "*".
@@ -465,7 +516,7 @@ pushDoc vars query replyHandler =
                 , ( "query", Encode.string query )
                 ]
     in
-        Push.init channelTopic "doc"
+        Push.init baseTopic "doc"
             |> Push.withPayload payload
             |> Push.onOk (replyHandler ReplyOk)
             |> Push.onError (replyHandler ReplyErr)
@@ -547,18 +598,133 @@ deleteBatchMutation idList =
         pushDoc [ ( "ids", ids ) ] query DeleteBatchReply
 
 
+{-| To get updates on a GraphQL subscription we must send a subscription query to the server.
+After sending a subscription document to Absinthe to let the server set up a pubsub
+for the GraphQL subscription, the server will reply with the subscriptionId in the reply payload.
+-}
+itemsSubscription : String -> Cmd Msg
+itemsSubscription name =
+    let
+        query =
+            "subscription { " ++ name ++ " { id title order completed insertedAt } }"
+    in
+        pushDoc [] query (SubscriptionReply name)
 
--- SUBSCRIPTIONS
 
 
-absintheChannel : Channel Msg
-absintheChannel =
+-- ABSINTHE-GRAPHQL MESSAGE PAYLOAD DECODERS
+
+
+todoDecoder : Json.Decoder BackendEntry
+todoDecoder =
+    Pipeline.decode BackendEntry
+        |> Pipeline.required "id" Json.string
+        |> Pipeline.required "title" Json.string
+        |> Pipeline.required "order" Json.int
+        |> Pipeline.required "completed" Json.bool
+
+
+listOfTodoDecoder : Json.Decoder (List BackendEntry)
+listOfTodoDecoder =
+    Json.list todoDecoder
+
+
+{-| Absinthe query and mutation reply messages have a payload that looks like this:
+
+{ "data": { queryName: results } }
+
+We use this decoder for single todo item results.
+
+-}
+itemMutationDataDecoder : String -> Json.Decoder BackendEntry
+itemMutationDataDecoder name =
+    Json.at [ "data", name ] todoDecoder
+
+
+{-| Absinthe query and mutation reply messages have a payload that looks like this:
+
+{ "data": { queryName: results } }
+
+We use this decoder for list of todo item results.
+
+-}
+listMutationDataDecoder : String -> Json.Decoder (List BackendEntry)
+listMutationDataDecoder name =
+    Json.at [ "data", name ] listOfTodoDecoder
+
+
+{-| Absinthe "subscription:data" messages have a payload that looks like this:
+
+    { "subscriptionId":"**absinthe**:doc:87829607",
+      "result": {
+        "data": {
+          "itemsDeleted": [
+             { "title":"jkl", "order":20, "insertedAt":"2018-06-24T00:02:43.994201Z",
+                "id":"39a45d5f-9945-405e-879b-ba93aad08d06", "completed":false } ]
+         }
+       }
+    }
+
+Our subscriptions always send a list of todo items. We fetch the contents of
+[ "result", "data", <subscription name>] and then decode the list of todo items there.
+
+-}
+itemsSubscriptionDataDecoder : String -> Json.Decoder (List BackendEntry)
+itemsSubscriptionDataDecoder name =
+    Json.at [ "result", "data", name ] listOfTodoDecoder
+
+
+{-| The payload of the reply for our subscription document just has a single
+"subscriptionId" key.
+-}
+subscriptionReplyDecoder : Json.Decoder String
+subscriptionReplyDecoder =
+    Json.at [ "subscriptionId" ] Json.string
+
+
+
+-- PHOENIX SOCKET
+
+
+{-| Append "/websocket" to the address that is defined in the Elixir
+TodoAbsintheWeb.Endpoint module.
+-}
+socketAddress : String
+socketAddress =
+    "ws://localhost:4000/socket/websocket"
+
+
+userSocket : Socket Msg
+userSocket =
+    Socket.init socketAddress
+        |> Socket.withDebug
+        |> Socket.onOpen (SocketStatusChanged SocketConnected)
+        |> Socket.onClose (SocketStatusChanged << SocketDisconnected)
+        |> Socket.onAbnormalClose SocketClosedAbnormally
+        |> Socket.reconnectTimer (\backoffIteration -> (backoffIteration + 1) * 5000 |> toFloat)
+
+
+
+-- PHOENIX CHANNELS
+
+
+{-| This must match the topic for the Phoenix channel on the Elixir side.
+We use the same topic for configuring and returning GraphQL subscription messages.
+-}
+baseTopic : String
+baseTopic =
+    "*"
+
+
+baseChannel : Channel Msg
+baseChannel =
     let
         presence =
             Presence.create
                 |> Presence.onChange PresenceChanged
     in
-        Channel.init channelTopic
+        Channel.init baseTopic
+            |> Channel.withDebug
             |> Channel.onRequestJoin (ChannelStatusChanged Joining)
             |> Channel.onJoin (ChannelStatusChanged << Joined)
             |> Channel.onRejoin (ChannelStatusChanged << Rejoined)
@@ -568,26 +734,35 @@ absintheChannel =
             |> Channel.onError (ChannelStatusChanged Crashed)
             |> Channel.onDisconnect (ChannelStatusChanged ChannelDisconnected)
             |> Channel.withPresence presence
-            |> Channel.on "itemsCreated" ItemsCreated
-            |> Channel.on "itemsUpdated" ItemsUpdated
-            |> Channel.on "itemsDeleted" ItemsDeleted
-            |> Channel.withDebug
 
 
-userSocket : Socket Msg
-userSocket =
-    Socket.init socketAddress
-        |> Socket.onOpen (SocketStatusChanged SocketConnected)
-        |> Socket.onClose (SocketStatusChanged << SocketDisconnected)
-        |> Socket.onAbnormalClose SocketClosedAbnormally
-        |> Socket.reconnectTimer (\backoffIteration -> (backoffIteration + 1) * 5000 |> toFloat)
+{-| After sending a subscription document to Absinthe to let the server set up a pubsub
+for the GraphQL subscription, the server replies with the subscriptionId in the reply payload.
+To get data on this subscription, we need to open a new channel with the subscriptionId
+as the topic, and listen for "subscription:data" events on it.
+-}
+itemsSubscriptionChannel : ReplyStatus -> String -> Json.Value -> Maybe (Channel Msg)
+itemsSubscriptionChannel status name reply =
+    case ( status, Json.decodeValue subscriptionReplyDecoder reply ) of
+        ( ReplyOk, Ok subscriptionId ) ->
+            Channel.init subscriptionId
+                |> Channel.withDebug
+                |> Channel.on "subscription:data" (SubscriptionData name)
+                |> Just
+
+        _ ->
+            Nothing
+
+
+
+-- SUBSCRIPTIONS
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
         [ Time.every Time.second Tick
-        , Phoenix.connect userSocket [ absintheChannel ]
+        , Phoenix.connect userSocket <| baseChannel :: Dict.values model.itemsChannels
         ]
 
 
