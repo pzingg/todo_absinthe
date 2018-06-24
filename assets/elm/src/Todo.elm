@@ -369,10 +369,15 @@ update msg ({ state } as model) =
             let
                 ( nextModel, subscriptionCmds ) =
                     case status of
+                        -- When we have just joined the "*" channel, add the
+                        -- subscription channels.
                         Joined _ ->
                             subscribeAll model
 
-                        Left _ ->
+                        -- We don't use the "Leaving" state just yet, but if or when
+                        -- we do, let's unsubscribe from our subscription channels
+                        -- before leaving the "*" channel.
+                        Leaving ->
                             unsubscribeAll model
 
                         _ ->
