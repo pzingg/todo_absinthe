@@ -104,6 +104,11 @@ by using Absinthe subscriptions if the backend store is modified by other users.
 
 Hoping to find a clean implementation of this kind of syncing somewhere.
 
+Currently, the code does monitor for changes using GraphQL subscriptions and
+updates the frontend model state if backend changes (adds, updates and deletes)
+from other clients are detected, but does not detect network disconnects, nor does
+it attempt to sync items modified when offline back to the server.
+
 
 ## Phoenix / Absinthe Info
 
