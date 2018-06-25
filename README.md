@@ -57,13 +57,14 @@ Ready to run in production? Please
 
 ## Ecto / Database Notes
 
-* PostgreSQL database with a todos table.
-* Using string UUIDs for ids (configured in config/config.exs).
-* The `order` field (part of the TodoMVC spec) is an auto-incremented (`:serial`) integer.
-In the Elm TodoMVC implementation, this field was omitted.
-* Have to use the `read_after_writes` option (PostgreSQL-specific) to grab DB values
-after insert/update operations in order to return the `order` field to the Absinthe
-reply correctly.
+* Data is stored in a PostgreSQL database with a single `todos` table.
+* UUIDs are used for the `id` field. See the `:migration_primary_key` configuration
+option in `config/config.exs`.
+* An auto-incremented (`:serial`) integer is used for the `order` field, part of the TodoMVC spec.
+In the original Elm TodoMVC implementation, this field was not used.
+* The PostgreSQL-specific `:read_after_writes` option is used to return updated DB values
+after insert/update operations, so that we can return the auto-generated `order` field value
+in the Absinthe reply correctly.
 
 
 ## Elm - Absinthe Transport over a Phoenix Channel
@@ -81,13 +82,23 @@ by Elm (and GraphiQL).
 
 See the `lib/todo_absinthe_web/channels/doc_channel.ex` source file for more information.
 
-### Client side channel setup
+### Client side main channel setup
 
 On the Elm side, the frontend creates and subscribes to a Phoenix channel with the "\*"
 topic at startup. This channel is configured with callbacks that monitor status changes
 and errors.
 
-When the "\*" channel is joined, the Elm frontend then creates and subscribes
+### Sending GraphQL operations and decoding replies
+
+To make an Absinthe GraphQL query, mutation, or subscription request, Elm pushes a "doc" event
+to the "\*" channel. The payload is JSON encoded with GraphQL variables and the operation
+document. The reply constructed by Absinthe is received as an Elm message
+and the payload, containing `data` and/or `errors` components are decoded if
+necessary.
+
+### Listening for GraphQL subscriptions
+
+When the "\*" channel is first joined, the Elm frontend creates and subscribes
 to additional channels for the GraphQL subscriptions.
 
 Following the protocol used by GraphiQL, Elm can subscribe to GraphQL subscription
@@ -106,22 +117,15 @@ The `subscription:data` payloads include two components:
 * `subscriptionId` - the same id used for the topic.
 * `result` - a JSON value containing the standard GraphQL `data` reply.
 
-More detailed comments can be found in the single Elm source file located in
-the repository at `assets/elm/src/Todo.elm`.
+To unsubscribe from a subscription, Elm pushes an "unsubscribe" event to the "\*"
+channel with a payload specifying the subscription ID.
 
 A clickable link was added to the original footer in the Elm user interface in order
 to exercise pubsub operations. Clicking the link will either subscribe to the
 subscriptions "itemsCreated", "itemsUpdated" and "itemsDeleted", or unsubscribe from them.
 
-### Client side GraphQL operations over WebSockets
-
-To make an Absinthe query, mutation, or subscription request, Elm pushes a "doc" event
-to the "\*" channel. The payload is JSON encoded with GraphQL variables and the operation
-document. The reply constructed by Absinthe is received as an Elm message
-and the payload decoded as necessary.
-
-To unsubscribe from a subscription, Elm pushes an "unsubscribe" event with the
-subscription ID encoded in the payload.
+For more information, see the comments in the single Elm source file located in
+the repository at `assets/elm/src/Todo.elm`.
 
 
 ## TODO: Syncing Offline Edits
