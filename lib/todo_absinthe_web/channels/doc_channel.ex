@@ -4,7 +4,7 @@ defmodule TodoAbsintheWeb.DocChannel do
 
   @moduledoc """
   DocChannel defines a Phoenix channel that we use to transport GraphQL operations
-  from a client over websockets rather than over HTTP.  Code in this module liberally
+  from a client over WebSockets rather than over HTTP.  Code in this module liberally
   copied from the Absinthe.Phoenix.Channel module.  We hardcode our Schema module
   and the "default pipeline" into absinthe_config.
   """

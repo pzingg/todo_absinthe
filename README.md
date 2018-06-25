@@ -1,8 +1,14 @@
 # TodoAbsinthe
 
-This is a port of TodoMVC app with an Elm frontend with Elixir/Absinthe/GraphQL backend.
+This is a port of the [TodoMVC app](http://todomvc.com), implemented with an Elm frontend
+and an Elixir/Phoenix/Absinthe/GraphQL backend.
 
-Original Elm frontend code by Evan Czaplicki at https://github.com/evancz/elm-todomvc
+The original serverless Elm frontend code for this project was written by Evan Czaplicki,
+and is available at https://github.com/evancz/elm-todomvc
+
+This version adds data persistence via the Elixir backend. The Elm frontend communicates
+with the backend over Phoenix "channels" (WebSockets with a clearly defined protocol)
+in both directions.
 
 
 ## Building the Elm Frontend
@@ -63,7 +69,7 @@ reply correctly.
 ## Elm - Absinthe Transport over a Phoenix Channel
 
 While GraphQL servers are most commonly accessed by clients over HTTP, the
-Elm frontend in this project uses a websocket transport, implemented with functions
+Elm frontend in this project uses a WebSocket transport, implemented with functions
 in the courtesy of the elm-phoenix project (see Elm Notes section above).
 
 ### Server side channel setup
@@ -107,7 +113,7 @@ A clickable link was added to the original footer in the Elm user interface in o
 to exercise pubsub operations. Clicking the link will either subscribe to the
 subscriptions "itemsCreated", "itemsUpdated" and "itemsDeleted", or unsubscribe from them.
 
-### Client side GraphQL operations over websockets
+### Client side GraphQL operations over WebSockets
 
 To make an Absinthe query, mutation, or subscription request, Elm pushes a "doc" event
 to the "\*" channel. The payload is JSON encoded with GraphQL variables and the operation
