@@ -37,25 +37,28 @@ exports.config = {
   // Phoenix paths configuration
   paths: {
     // Dependencies and current project directories to watch
-    watched: ["static", "css", "js", "elm/src", "vendor"],
+    watched: ["static", "css", "js", "elm", "vendor"],
     // Where to compile files to
     public: "../priv/static"
   },
 
   // Configure your plugins
+  // See https://paulfioravanti.com/blog/2018/02/08/connecting-elm-to-phoenix-1-3/
   plugins: {
-    babel: {
-      // Do not use ES6 compiler in vendor code
-      ignore: [/vendor/]
-    },
-    // See http://codeloveandboards.com/blog/2017/02/02/phoenix-and-elm-a-real-use-case-pt-1
     elmBrunch: {
-      mainModules: ["elm/src/Todo.elm"],
+      // Set to path where elm-package.json is located, defaults to project root
+      elmFolder: "elm",
+      mainModules: ["src/Todo.elm"],
       executablePath: "/usr/lib/node_modules/elm/binwrappers",
-      outputFolder: "js/",
+      outputFolder: "../js",
       outputFile: "elm-main.js",
-      makeParameters: ["--debug"]
-    }
+      makeParameters: ["--debug", "--warn"]
+    },
+
+    babel: {
+      // Do not use ES6 compiler in vendor or Elm-generated Javascript code.
+      ignore: [/vendor/, "js/elm-main.js"]
+    },
   },
 
   modules: {

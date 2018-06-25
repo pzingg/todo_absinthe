@@ -17,19 +17,17 @@ To compile the Elm frontend, you will obviously need to
 Then, to rebuild the Elm frontend manually:
 
 ```bash
-cd assets
+cd assets/elm
 elm-github-install
-elm-make --debug --output=js/elm-main.js elm/src/Todo.elm
+elm-make --debug --warn --output=../js/elm-main.js src/Todo.elm
 ```
 
 Or just use the Elixir project's brunch build tool. The brunch configuration at
 `assets/brunch-config.js` will require installation of the
-[npm elm-brunch plugin](https://github.com/madsflensted/elm-brunch).
-
-Note to anyone interested: I can't seem to get brunch to understand that elm-main.js
-is a dependency of app.js, so that in practice I always seem to have to rebuild elm-main.js
-manually and then recompile and restart the server with `mix phx.server`. If you know
-how to fix the brunch config for me, please file a pull request!
+[npm elm-brunch plugin](https://github.com/madsflensted/elm-brunch). Make sure
+that `elm-brunch` is added to the `devDependencies` in `assets/package.json` or
+the elm-brunch will be a no-op (brunch will silently not compile the `elm/src/Todo.elm`
+file).
 
 
 ## Building and Starting the Server

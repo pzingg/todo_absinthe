@@ -4,8 +4,8 @@
     "repository": "https://github.com/evancz/elm-todomvc.git",
     "license": "BSD3",
     "source-directories": [
-        "./elm/src",
-        "./elm/vendor"
+        "./src",
+        "./vendor"
     ],
     "exposed-modules": [],
     "dependencies": {

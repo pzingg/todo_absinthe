@@ -12,7 +12,7 @@ npm-debug.log
 
 # Static artifacts
 /assets/node_modules
-/assets/elm-stuff
+/assets/elm/elm-stuff
 /assets/js/elm-main.js
 
 # Since we are building assets from assets/,
