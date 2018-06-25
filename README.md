@@ -57,7 +57,8 @@ Ready to run in production? Please
 
 ## Ecto / Database Notes
 
-* Data is stored in a PostgreSQL database with a single `todos` table.
+* Data is stored in a PostgreSQL database with a single `todos` table. See the schema
+definition in `lib/todo_absinthe/todo/item.ex` and the migration in `priv/repo/migrations/`.
 * UUIDs are used for the `id` field. See the `:migration_primary_key` configuration
 option in `config/config.exs`.
 * An auto-incremented (`:serial`) integer is used for the `order` field, part of the TodoMVC spec.
@@ -65,6 +66,16 @@ In the original Elm TodoMVC implementation, this field was not used.
 * The PostgreSQL-specific `:read_after_writes` option is used to return updated DB values
 after insert/update operations, so that we can return the auto-generated `order` field value
 in the Absinthe reply correctly.
+
+
+## Absinthe / GraphQL Notes
+
+The operations exposed by Absinthe are defined in `lib/todo_absinthe_web/schema.ex` and
+the input and return object definitions are in `lib/todo_absinthe_web/schema/content_types.ex`.
+
+The resolver code in `lib/todo_absinthe_web/resolvers/todo_resolver.ex` publishes changes
+to three subscriptions: "itemsCreated", "itemsUpdated" and "itemsDeleted", which allows
+for realtime updates to subscription clients.
 
 
 ## Elm - Absinthe Transport over a Phoenix Channel
