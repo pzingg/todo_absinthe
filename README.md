@@ -17,7 +17,7 @@ To compile the Elm frontend, you will obviously need to install the
 [Elm system tools](https://guide.elm-lang.org/install.html) on your machine
 and then install the Elm package dependencies specified in `assets/elm/elm-package.json`.
 
-Since one of those dependencies, [elm-phoenix package](https://github.com/saschatimme/elm-phoenix),
+Since one of those dependencies, [elm-phoenix](https://github.com/saschatimme/elm-phoenix),
 is an effect manager it is at the moment (Elm v0.18) not available via
 elm-package. Thus the recommended way to install the elm-phoenix package is to use the
 [elm-github-install package manager](https://github.com/gdotdesign/elm-github-install).
