@@ -5,15 +5,17 @@ This is a port of TodoMVC app with an Elm frontend with Elixir/Absinthe/GraphQL 
 Original Elm frontend code by Evan Czaplicki at https://github.com/evancz/elm-todomvc
 
 
-## Elm Installation Notes
+## Building the Elm Frontend
+
+To compile the Elm frontend, you will obviously need to
+(install the Elm system tools)[https://guide.elm-lang.org/install.html] on your machine
+and install the package dependencies specified in `assets/elm/elm-package.json`.
 
 Since the [elm-phoenix package](https://github.com/saschatimme/elm-phoenix)
 is an effect manager it is at the moment (Elm v0.18) not available via
 elm-package. Thus the recommended way to install the elm-phoenix package is to use the
 [elm-github-install package manager](https://github.com/gdotdesign/elm-github-install).
 
-To compile the Elm frontend, you will obviously need to
-(install the Elm system tools)[https://guide.elm-lang.org/install.html] on your machine.
 Then, to rebuild the Elm frontend manually:
 
 ```bash
@@ -22,12 +24,14 @@ elm-github-install
 elm-make --debug --warn --output=../js/elm-main.js src/Todo.elm
 ```
 
-Or just use the Elixir project's brunch build tool. The brunch configuration at
+Or just use the Elixir project's brunch build tool (which is automatically invoked when
+starting the dev server--see the next section of this README file). The brunch configuration at
 `assets/brunch-config.js` will require installation of the
-[npm elm-brunch plugin](https://github.com/madsflensted/elm-brunch). Make sure
-that `elm-brunch` is added to the `devDependencies` in `assets/package.json` or
-the elm-brunch will be a no-op (brunch will silently not compile the `elm/src/Todo.elm`
-file).
+[npm elm-brunch plugin](https://github.com/madsflensted/elm-brunch). After installation,
+verify that there is an `elm-brunch` line in the `devDependencies` of `assets/package.json`.
+If `elm-brunch` is missing from the package.json file, running brunch will ignore
+the `elmBrunch` plugin configuration silently and will not compile the `elm/src/Todo.elm`
+source file.
 
 
 ## Building and Starting the Server
