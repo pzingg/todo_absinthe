@@ -9,28 +9,45 @@ Original Elm frontend code by Evan Czaplicki at https://github.com/evancz/elm-to
 
 Since the [elm-phoenix package](https://github.com/saschatimme/elm-phoenix)
 is an effect manager it is at the moment (Elm v0.18) not available via
-elm-package. Thus the recommended way to install the package is to use
-elm-github-install. Simply add saschatimme/elm-phoenix to the dependencies in the
-elm-package.json file:
-
-```
-# elm-package.json
-{
-  ...
-  "dependencies": {
-    ...
-    "saschatimme/elm-phoenix": "0.3.0 <= v < 1.0.0",
-    ...
-  }
-  ...
-}
-```
-
-and install the package with the
+elm-package. Thus the recommended way to install the elm-phoenix package is to use the
 [elm-github-install package manager](https://github.com/gdotdesign/elm-github-install).
 
+To compile the Elm frontend, you will obviously need to
+(install the Elm system tools)[https://guide.elm-lang.org/install.html] on your machine.
+Then, to rebuild the Elm frontend manually:
 
-## Ecto Notes
+```bash
+cd assets
+elm-github-install
+elm-make --debug --output=js/elm-main.js elm/src/Todo.elm
+```
+
+Or just use the Elixir project's brunch build tool. The brunch configuration at
+`assets/brunch-config.js` will require installation of the
+[npm elm-brunch plugin](https://github.com/madsflensted/elm-brunch).
+
+Note to anyone interested: I can't seem to get brunch to understand that elm-main.js
+is a dependency of app.js, so that in practice I always seem to have to rebuild elm-main.js
+manually and then recompile and restart the server with `mix phx.server`. If you know
+how to fix the brunch config for me, please file a pull request!
+
+
+## Building and Starting the Server
+
+To start your Phoenix server:
+
+  * Install dependencies with `mix deps.get`
+  * Create and migrate your database with `mix ecto.create && mix ecto.migrate`
+  * Install Node.js dependencies with `cd assets && npm install`
+  * Start Phoenix endpoint with `mix phx.server`
+
+Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+
+Ready to run in production? Please
+[check the Phoenix deployment guides](http://www.phoenixframework.org/docs/deployment).
+
+
+## Ecto / Database Notes
 
 * PostgreSQL database with a todos table.
 * Using string UUIDs for ids (configured in config/config.exs).
@@ -54,13 +71,16 @@ that is largely based on (meaning lots of code copying from) `Absinthe.Phoenix.C
 The DocChannel has pubsub enabled, so that subscriptions can also be subscribed to it
 by Elm (and GraphiQL).
 
-See lib/todo_absinthe_web/channels/doc_channel.ex source file for more info.
+See the `lib/todo_absinthe_web/channels/doc_channel.ex` source file for more information.
 
 ### Client side channel setup
 
 On the Elm side, the frontend creates and subscribes to a Phoenix channel with the "\*"
-topic at startup. When the channel is joined, the frontend then creates and subscribes
-to channels for the GraphQL subscriptions. This channel is monitored for status changes.
+topic at startup. This channel is configured with callbacks that monitor status changes
+and errors.
+
+When the "\*" channel is joined, the Elm frontend then creates and subscribes
+to additional channels for the GraphQL subscriptions.
 
 Following the protocol used by GraphiQL, Elm can subscribe to GraphQL subscription
 messages as follows:
@@ -78,10 +98,12 @@ The `subscription:data` payloads include two components:
 * `subscriptionId` - the same id used for the topic.
 * `result` - a JSON value containing the standard GraphQL `data` reply.
 
-More detailed comments can be found in the source file at assets/elm/src/Todo.elm.
-The footer in the user interface has a clickable link for exercising the pubsub.
-Clicking the link will either subscribe to the subscriptions "itemsCreated",
-"itemsUpdated" and "itemsDeleted", or unsubscribe from them.
+More detailed comments can be found in the single Elm source file located in
+the repository at `assets/elm/src/Todo.elm`.
+
+A clickable link was added to the original footer in the Elm user interface in order
+to exercise pubsub operations. Clicking the link will either subscribe to the
+subscriptions "itemsCreated", "itemsUpdated" and "itemsDeleted", or unsubscribe from them.
 
 ### Client side GraphQL operations over websockets
 
@@ -94,7 +116,7 @@ To unsubscribe from a subscription, Elm pushes an "unsubscribe" event with the
 subscription ID encoded in the payload.
 
 
-## Bugs / TODO
+## TODO: Syncing Offline Edits
 
 The original Elm TodoMVC persisted updates in browser local storage, which is
 nice for persistence between browser sessions.  What is the best strategy for
@@ -108,17 +130,3 @@ Currently, the code does monitor for changes using GraphQL subscriptions and
 updates the frontend model state if backend changes (adds, updates and deletes)
 from other clients are detected, but does not detect network disconnects, nor does
 it attempt to sync items modified when offline back to the server.
-
-
-## Phoenix / Absinthe Info
-
-To start your Phoenix server:
-
-  * Install dependencies with `mix deps.get`
-  * Create and migrate your database with `mix ecto.create && mix ecto.migrate`
-  * Install Node.js dependencies with `cd assets && npm install`
-  * Start Phoenix endpoint with `mix phx.server`
-
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
-
-Ready to run in production? Please [check our deployment guides](http://www.phoenixframework.org/docs/deployment).

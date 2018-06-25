@@ -691,7 +691,7 @@ listOfTodoDecoder =
 
 {-| Absinthe query and mutation reply messages have a payload that looks like this:
 
-{ "data": { queryName: results } }
+{ "data": { "operationName": results... } }
 
 We use this decoder for single todo item results.
 
@@ -703,7 +703,7 @@ itemResultDataDecoder name =
 
 {-| Absinthe query and mutation reply messages have a payload that looks like this:
 
-{ "data": { queryName: results } }
+{ "data": { "operationName": results... } }
 
 We use this decoder for list of todo item results.
 
