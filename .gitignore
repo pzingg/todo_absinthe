@@ -3,6 +3,8 @@
 /db
 /deps
 /*.ez
+*.pyc
+*.pyo
 
 # Generated on crash by the VM
 erl_crash.dump
