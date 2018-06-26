@@ -7,8 +7,8 @@ The original serverless Elm frontend code for this project was written by Evan C
 and is available at https://github.com/evancz/elm-todomvc
 
 This version adds data persistence via the Elixir backend. The Elm frontend communicates
-with the backend over Phoenix "channels" (WebSockets with a clearly defined protocol)
-in both directions.
+with the backend over Phoenix channels (distributed WebSockets with defined message
+and broadcast protocols) in both directions.
 
 
 ## Building the Elm Frontend
