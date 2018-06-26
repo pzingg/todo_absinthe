@@ -39,6 +39,23 @@ If `elm-brunch` is missing from the package.json file, running brunch will ignor
 the `elmBrunch` plugin configuration silently and will not compile the `elm/src/Todo.elm`
 source file.
 
+### For Elm developers
+
+If you want your Elm application to be served by Phoenix, it's pretty simple to move
+your existing Elm-only project into an Elixir Phoenix project:
+
+1. The layout for the your existing index.html gets moved to the Phoenix layout template at
+`lib/todo_absinthe_web/templates/layout/app.html.eex`. Specify the title and any included
+.js or .css files here. In our case we use the Phoenix-standard `js/app.js` and `css/app.css` files.
+2. The content for your layout, contained within your existing index.html file, gets moved
+to the Phoenix index template at `lib/todo_absinthe_web/templates/page/index.html.eex`.
+If you are making Elm fullscreen, this file can be empty!  If you are embedding Elm inside
+a `div`, put just the `div` here.
+3. Move your CSS styles to `assets/css/app.css` and your embedding/fullscreen startup code
+and any Javascript ports to `assets/js/app.js`. In the app.js file, add this require to
+build in your Elm frontend: `import Elm from "./elm-main";` (or whatever your Elm frontend
+output js file is).
+
 
 ## Building and Starting the Server
 

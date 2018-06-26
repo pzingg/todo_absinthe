@@ -9,7 +9,7 @@ use Mix.Config
 config :todo_absinthe,
   ecto_repos: [TodoAbsinthe.Repo]
 
-config :todo_absinthe, TodoAbsinthe.Repo, 
+config :todo_absinthe, TodoAbsinthe.Repo,
   migration_primary_key: [id: :uuid, type: :binary_id]
 
 # Configures the endpoint
@@ -17,8 +17,7 @@ config :todo_absinthe, TodoAbsintheWeb.Endpoint,
   url: [host: "localhost"],
   secret_key_base: "bKuXnxtobV6+vfXetsdwmuehT1HOif5cEiMAkCziYtsVA0OoScp+Uc+diatYxqH+",
   render_errors: [view: TodoAbsintheWeb.ErrorView, accepts: ~w(html json)],
-  pubsub: [name: TodoAbsinthe.PubSub,
-           adapter: Phoenix.PubSub.PG2]
+  pubsub: [name: TodoAbsinthe.PubSub, adapter: Phoenix.PubSub.PG2]
 
 # Configures Elixir's Logger
 config :logger, :console,
